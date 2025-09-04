@@ -1,0 +1,21 @@
+# Core deep learning
+torch
+torchvision
+torchaudio
+timm
+transformers
+
+# Data processing
+albumentations
+opencv-python
+pillow
+pyyaml
+
+# Backend / services
+fastapi
+uvicorn
+kafka-python
+redis
+
+# Testing
+pytest

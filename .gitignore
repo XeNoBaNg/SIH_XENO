@@ -1,0 +1,59 @@
+# ------------------------
+# Python
+# ------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pkl
+*.egg-info/
+*.log
+
+# Virtual environment
+venv/
+ENV/
+env/
+.venv/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# ------------------------
+# Data & Models
+# ------------------------
+data/raw/
+data/processed/
+data/synthetic/
+data/annotations/
+weights/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.ckpt
+
+# ------------------------
+# Cache & Temp
+# ------------------------
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# ------------------------
+# VSCode / IDE
+# ------------------------
+.vscode/
+.idea/
+
+# ------------------------
+# Docker
+# ------------------------
+*.tar
+docker/*.log
+
+# ------------------------
+# OS files
+# ------------------------
+desktop.ini
