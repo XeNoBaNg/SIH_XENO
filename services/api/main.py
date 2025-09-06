@@ -1,72 +1,88 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
-from PIL import Image
-import io
+import uuid, json
+from kafka import KafkaProducer, KafkaConsumer
 
-# Import our Step 2 stubs
-from models.backbones.hybrid_vit_swin import HybridViTSwinBackbone
-from models.detectors.deformable_detr import DeformableDetrDetector
-from models.detectors.yolo_wrapper import YOLODetector
-from models.ensemble.meta_learner import MetaLearner
-from models.ensemble.fusion import fuse_predictions
-from models.fewshot.prototype_adapter import FewShotAdapter
+# ========================
+# Kafka Config
+# ========================
+KAFKA_BROKERS = ["localhost:9092"]
+REQUEST_TOPIC = "civic-issues"
+RESULT_TOPIC = "civic-results"
 
-# Initialize FastAPI app
-app = FastAPI(title="Civic Issue Detection API", version="0.1")
+# Initialize Kafka Producer
+producer = KafkaProducer(
+    bootstrap_servers=KAFKA_BROKERS,
+    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+)
 
-# Initialize model stubs (in-memory, on startup)
-backbone = HybridViTSwinBackbone()
-detr = DeformableDetrDetector()
-yolo = YOLODetector()
-ensemble = MetaLearner()
-fewshot = FewShotAdapter()
+# ========================
+# FastAPI App
+# ========================
+app = FastAPI(title="Civic Issue Detection API", version="0.3")
 
 
+# ---- 1. Root ----
+@app.get("/")
+async def root():
+    return {
+        "message": "Welcome to Civic-AI API 🚀",
+        "docs": "Visit /docs for API documentation and testing."
+    }
+
+
+# ---- 2. Health Check ----
 @app.get("/health")
 async def health_check():
-    """
-    Simple health check endpoint.
-    """
-    return {"status": "ok", "message": "Civic-AI service is running"}
+    return {"status": "success", "message": "Civic-AI service is running"}
 
 
+# ---- 3. Inference (push job to Kafka) ----
 @app.post("/infer")
 async def infer(file: UploadFile = File(...)):
-    """
-    Inference endpoint.
-    Accepts an image upload, runs through model pipeline, and returns predictions.
-    """
-
     try:
-        # Read image into PIL
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
+        request_id = str(uuid.uuid4())
 
-        # 1. Backbone features (not used in stub yet, but extracted anyway)
-        features = backbone("dummy_input")
-
-        # 2. Run detectors
-        detr_out = detr.predict(image)
-        yolo_out = yolo.predict(image)
-
-        # 3. Fuse predictions
-        fused = fuse_predictions([detr_out, yolo_out])
-
-        # 4. Meta-learner: pick final label from candidates
-        labels = [pred["label"] for pred in detr_out + yolo_out]
-        final = ensemble.predict(labels)
-
-        # 5. Few-shot adapter
-        fewshot_result = fewshot.predict(image)
-
-        response = {
-            "final_label": final["final_label"],
-            "confidence": final["confidence"],
-            "detections": fused["fused_predictions"],
-            "fewshot": fewshot_result["predicted_label"],
+        # For now, we only pass filename (later we will save file / base64 encode)
+        job = {
+            "request_id": request_id,
+            "filename": file.filename
         }
 
-        return JSONResponse(content=response)
+        # Push to Kafka requests topic
+        producer.send(REQUEST_TOPIC, job)
+
+        return {"status": "queued", "request_id": request_id}
 
     except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse(
+            content={"status": "error", "message": str(e)},
+            status_code=500
+        )
+
+
+# ---- 4. Fetch Result (consume from results topic) ----
+@app.get("/result/{request_id}")
+async def get_result(request_id: str):
+    try:
+        # Create a temporary consumer to fetch results
+        consumer = KafkaConsumer(
+            RESULT_TOPIC,
+            bootstrap_servers=KAFKA_BROKERS,
+            value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+            auto_offset_reset="earliest",
+            consumer_timeout_ms=2000   # stop after 2 seconds
+        )
+
+        for msg in consumer:
+            result = msg.value
+            if result.get("request_id") == request_id:
+                return result
+
+        return {"status": "pending", "request_id": request_id}
+
+    except Exception as e:
+        return JSONResponse(
+            content={"status": "error", "message": str(e)},
+            status_code=500
+        )
