@@ -1,3 +1,17 @@
+<<<<<<< Updated upstream
+=======
+
+"""
+YOLOv8 wrapper using ultralytics package (ultralytics>=8).
+Provides robust device selection, batching and result normalization.
+
+Usage:
+    detector = YOLODetector(weights_path="yolov8n.pt", device=device)
+    preds = detector.predict(pil_image)  # list of dicts
+"""
+from typing import List, Dict, Optional, Union
+from PIL import Image
+>>>>>>> Stashed changes
 import torch
 
 class YOLODetector:

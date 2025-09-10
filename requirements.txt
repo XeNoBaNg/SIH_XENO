@@ -1,21 +1,28 @@
-# Core deep learning
+# Core Deep Learning & Scientific
 torch
 torchvision
 torchaudio
 timm
 transformers
+numpy
 
-# Data processing
-albumentations
+# NLP & Vision Specific
+sentence-transformers
+ultralytics
 opencv-python
 pillow
-pyyaml
 
-# Backend / services
+# Backend / Services
 fastapi
-uvicorn
+uvicorn[standard]
+python-multipart
 kafka-python
 redis
+
+# Reporting & Utilities
+pyyaml
+python-pptx
+tqdm
 
 # Testing
 pytest
