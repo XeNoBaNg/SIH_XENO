@@ -32,13 +32,15 @@ CLASS_MAP = {
 # (Also keep your HybridViTSwinBackbone, YOLODetector, etc. imports)
 # (Also keep your CLASS_MAP and DEPARTMENT_MAP dictionaries)
 
+# In models/ensemble/fuser.py
+
 class CivicIssueFuser:
     """
-    Orchestrates the ML pipeline with department mapping and enhanced spam check.
+    SIMPLIFIED VERSION: Predicts the main department directly.
     """
     def __init__( self, backbone_weights: Optional[str] = None, yolo_weights: str = "yolov8n.pt",
         meta_learner_weights: Optional[str] = None, spam_model: str = 'all-MiniLM-L6-v2',
-        device: Optional[torch.device] = None, num_classes: int = 27,
+        device: Optional[torch.device] = None, num_classes: int = 6,
     ):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Initializing Fuser on device: {self.device}")
@@ -52,14 +54,10 @@ class CivicIssueFuser:
         self.backbone.eval()
         
         self.detector = YOLODetector(weights_path=yolo_weights, device=self.device)
-        self.meta_learner = None
         self.captioner = BLIPCaptioner(device=self.device)
         self.spam_checker = SentenceTransformer(spam_model, device=self.device)
 
     def _is_relevant(self, combined_user_text: str, ai_caption: str, prediction_label: str, threshold: float = 0.50) -> Dict:
-        """
-        Performs a two-part check using the combined user text.
-        """
         if not combined_user_text.strip():
             return {"is_relevant": True, "relevance_score": 1.0, "reason": "No user text provided."}
         
@@ -78,9 +76,8 @@ class CivicIssueFuser:
 
     @torch.no_grad()
     def predict(self, image: Image.Image, issue_title: str = "", user_description: str = "") -> Dict:
-        """
-        UPDATED to accept 'issue_title'.
-        """
+        """Simplified prediction method."""
+        
         yolo_predictions = self.detector.predict(image)
         ai_caption = self.captioner.caption(image)
         
@@ -90,18 +87,18 @@ class CivicIssueFuser:
         prediction_idx = torch.argmax(final_probs).item()
         confidence = final_probs[prediction_idx].item()
         
-        specific_issue = CLASS_MAP.get(prediction_idx, "unknown_issue")
-        main_department = DEPARTMENT_MAP.get(specific_issue, "Uncategorized")
+        # Directly look up the predicted department from the simplified CLASS_MAP
+        predicted_department = CLASS_MAP.get(prediction_idx, "Uncategorized")
         
+        # Spam check uses the combined user text and the predicted department name
         combined_user_text = f"{issue_title}. {user_description}"
-        relevance_check = self._is_relevant(combined_user_text, ai_caption, specific_issue)
+        relevance_check = self._is_relevant(combined_user_text, ai_caption, predicted_department)
 
         return {
-            "department": main_department,
-            "specific_issue_predicted": specific_issue,
+            "department": predicted_department, # The main prediction is the department
             "confidence": confidence,
             "relevance": relevance_check,
             "ai_caption": ai_caption,
             "detections": yolo_predictions,
-            "model_version": "0.9-department-routing"
+            "model_version": "1.0-department-direct"
         }
