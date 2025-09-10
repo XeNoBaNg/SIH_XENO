@@ -14,15 +14,14 @@ from models.captioning.blip_wrapper import BLIPCaptioner
 # Define the final classes your system will predict
 # models/ensemble/fuser.py
 
-# Define the final classes your system will predict
-CLASS_MAP = {
-    0: "broken_streetlight",
-    1: "garbage_dump",
-    2: "pothole",
-    3: "waterlogging"
-    # If you train with more classes, add them here in alphabetical order
-}
 
+
+CLASS_MAP = {
+    0: "Streetlight and Electricity",
+    1: "Waste Management",
+    2: "Roads and Potholes",
+    3: "waterlogging"
+}
 # models/ensemble/fuser.py
 
 # (Keep all your existing imports)
