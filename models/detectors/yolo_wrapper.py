@@ -1,44 +1,43 @@
-<<<<<<< Updated upstream
-=======
-
+# models/detectors/yolo_wrapper.py
 """
-YOLOv8 wrapper using ultralytics package (ultralytics>=8).
-Provides robust device selection, batching and result normalization.
-
-Usage:
-    detector = YOLODetector(weights_path="yolov8n.pt", device=device)
-    preds = detector.predict(pil_image)  # list of dicts
+YOLOv8 wrapper using the ultralytics package.
+Provides robust device selection and result normalization.
 """
 from typing import List, Dict, Optional, Union
 from PIL import Image
->>>>>>> Stashed changes
 import torch
 
 class YOLODetector:
-    """
-    Stub implementation of YOLO wrapper.
-    For now, returns a single fake detection.
-    Later, will wrap Ultralytics YOLOv8 or YOLO-Nano for real predictions.
-    """
+    def __init__(self, weights_path: str = "yolov8n.pt", device: Optional[torch.device] = None):
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            raise ImportError("ultralytics package not found. Please run `pip install ultralytics`.")
+        
+        self.model = YOLO(weights_path)
+        # The ultralytics library handles device mapping well, but this ensures consistency
+        self.model.to(self.device)
+        print(f"YOLODetector loaded weights={weights_path} on {self.device}")
 
-    def __init__(self):
-        # CPU for dev
-        self.device = torch.device("cpu")
-        # GPU for deployment:
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    def predict(self, image):
+    def predict(self, image: Union[Image.Image, str], conf: float = 0.25) -> List[Dict]:
         """
-        Simulates YOLO object detection.
-        Returns a list of bounding boxes with category & score.
+        Runs YOLOv8 prediction on a single image.
+        Returns a list of dictionaries, each containing 'bbox', 'label', and 'score'.
         """
-        dummy_output = [
-            {"bbox": [120, 80, 260, 300], "label": "waterlogging", "score": 0.91}
-        ]
-        return dummy_output
-
-
-if __name__ == "__main__":
-    model = YOLODetector()
-    preds = model.predict("test.jpg")
-    print("YOLO Predictions:", preds)
+        # The model from the ultralytics package can accept a PIL Image directly
+        results = self.model(image, conf=conf, verbose=False)
+        
+        output = []
+        # The results object is a list; we process the first (and only) result
+        for box in results[0].boxes:
+            bbox_coords = box.xyxy.tolist()[0]
+            label = self.model.names[int(box.cls)]
+            score = float(box.conf)
+            
+            output.append({
+                "bbox": [float(coord) for coord in bbox_coords],
+                "label": label,
+                "score": score
+            })
+        return output
