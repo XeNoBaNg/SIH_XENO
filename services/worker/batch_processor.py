@@ -6,6 +6,7 @@ import io
 import redis
 from kafka import KafkaConsumer, KafkaProducer
 from PIL import Image
+import datetime
 
 # Import the Fuser
 from models.ensemble.fuser import CivicIssueFuser
@@ -18,24 +19,21 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 
 # ---- Model Paths ----
-# Make sure this points to your trained model
 BACKBONE_WEIGHTS = "weights/backbone.pth"
-META_LEARNER_WEIGHTS = None
-
-# For YOLO, just provide the model name. The library will handle the download.
 YOLO_WEIGHTS = "yolov8n.pt" 
 
-# ---- Initialize the Fuser and Redis Client ONCE at startup ----
+# ---- Initialize Fuser and Redis Client ----
 print("Initializing Civic Issue Fuser pipeline...")
 fuser = CivicIssueFuser(
     backbone_weights=BACKBONE_WEIGHTS,
     yolo_weights=YOLO_WEIGHTS,
-    meta_learner_weights=META_LEARNER_WEIGHTS,
-    num_classes=6 # Or 4, or 25, depending on which model you trained
+    num_classes=4
 )
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
 print("Redis client connected.")
 
+
+# In services/worker/batch_processor.py
 
 def run_worker():
     consumer = KafkaConsumer(
@@ -45,10 +43,9 @@ def run_worker():
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
         auto_offset_reset="earliest",
     )
-
     producer = KafkaProducer(
         bootstrap_servers=KAFKA_BROKERS,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        value_serializer=lambda v: json.dumps(v, indent=2).encode("utf-8"),
     )
 
     print("⚡ AI Worker started, listening for inference jobs...")
@@ -60,26 +57,53 @@ def run_worker():
 
         try:
             image_b64 = data["image_b64"]
-            # Get the issue_title and user_description from the job
             issue_title = data.get("issue_title", "")
             user_desc = data.get("user_description", "")
             
             image_bytes = base64.b64decode(image_b64)
             image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-            # Run the full prediction pipeline
             prediction_result = fuser.predict(
                 image=image,
                 issue_title=issue_title,
                 user_description=user_desc
             )
 
+            relevance_data = prediction_result.get("relevance", {})
+            spam_status = "Not Spam" if relevance_data.get("is_relevant") else "Potential Spam"
+            
+            confidence_score = prediction_result.get("confidence", 0)
+            if confidence_score > 0.9:
+                confidence_level = "Very High"
+            elif confidence_score > 0.7:
+                confidence_level = "High"
+            else:
+                confidence_level = "Medium"
+
             final_result = {
                 "request_id": request_id,
                 "status": "processed",
-                "issue_title": issue_title,
-                "user_description": user_desc,
-                **prediction_result
+                "processed_at": datetime.datetime.now().isoformat(),
+                "user_input": {
+                    "issue_title": issue_title,
+                    "description": user_desc
+                },
+                "ai_analysis": {
+                    "department": prediction_result.get("department"),
+                    "confidence": confidence_score,
+                    "confidence_level": confidence_level,
+                    "spam_check": {
+                        "status": spam_status,
+                        "visual_score": relevance_data.get("score_visual"),
+                        "contextual_score": relevance_data.get("score_contextual")
+                        # --- "reason" field removed ---
+                    },
+                    "image_content": {
+                        "ai_caption": prediction_result.get("ai_caption"),
+                        "detected_objects": prediction_result.get("detections")
+                    }
+                },
+                "model_version": prediction_result.get("model_version")
             }
 
         except Exception as e:
@@ -90,10 +114,7 @@ def run_worker():
                 "message": str(e),
             }
 
-        # 1. Push to Kafka topic for logging or stream processing
         producer.send(RESULT_TOPIC, final_result)
-        
-        # 2. Store in Redis for fast API retrieval (key expires in 1 hour)
         redis_client.setex(f"result:{request_id}", 3600, json.dumps(final_result))
         
         print(f"✅ Processed job {request_id}, results stored.")

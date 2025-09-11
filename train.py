@@ -15,8 +15,8 @@ DATA_DIR = "dataset"
 MODEL_SAVE_PATH = "weights/backbone.pth"
 NUM_CLASSES = 4  # Adjust this to the number of folders in your dataset/train directory
 BATCH_SIZE = 8  # Lower this if you run out of memory (e.g., 8, 4)
-NUM_EPOCHS = 25  # Number of times to loop through the entire dataset
-LEARNING_RATE = 0.001
+NUM_EPOCHS = 50  # Number of times to loop through the entire dataset
+LEARNING_RATE = 0.0001
 
 def train_model():
     # --- 2. SETUP DEVICE, DATA TRANSFORMS, AND DATALOADERS ---

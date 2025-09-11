@@ -15,6 +15,9 @@ services:
     ports:
       - "9092:9092"
     environment:
+      # --- THE FIX: Explicitly disable KRaft to use Zookeeper ---
+      - KAFKA_ENABLE_KRAFT=no
+      
       - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
       - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092

@@ -5,79 +5,41 @@ from PIL import Image
 from typing import Dict, List, Optional
 from sentence_transformers import SentenceTransformer, util
 
-# Import the model wrappers
 from models.backbones.hybrid_vit_swin import HybridViTSwinBackbone, DEFAULT_TRANSFORMS
 from models.detectors.yolo_wrapper import YOLODetector
-from .meta_learner import MetaLearner # Corrected import
 from models.captioning.blip_wrapper import BLIPCaptioner
 
-# Define the final classes your system will predict
-# models/ensemble/fuser.py
-
-
-
 CLASS_MAP = {
-    0: "Streetlight and Electricity",
-    1: "Waste Management",
-    2: "Roads and Potholes",
-    3: "waterlogging"
+    0: "Roads and Potholes",
+    1: "Streetlight and Electricity",
+    2: "Waste Management",
+    3: "Water Supply and Sewage"
 }
-# models/ensemble/fuser.py
 
-# (Keep all your existing imports)
-
-# models/ensemble/fuser.py
-
-# (Keep all your existing imports: torch, F, Image, SentenceTransformer, etc.)
-# (Also keep your HybridViTSwinBackbone, YOLODetector, etc. imports)
-# (Also keep your CLASS_MAP and DEPARTMENT_MAP dictionaries)
-
-# In models/ensemble/fuser.py
 
 class CivicIssueFuser:
     """
-    SIMPLIFIED VERSION: Predicts the main department directly.
+    Final version with the multi-signal spam check.
     """
     def __init__( self, backbone_weights: Optional[str] = None, yolo_weights: str = "yolov8n.pt",
-        meta_learner_weights: Optional[str] = None, spam_model: str = 'all-MiniLM-L6-v2',
-        device: Optional[torch.device] = None, num_classes: int = 6,
+        spam_model: str = 'all-MiniLM-L6-v2',
+        device: Optional[torch.device] = None, num_classes: int = 4,
     ):
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Initializing Fuser on device: {self.device}")
         
         self.backbone = HybridViTSwinBackbone(num_classes=num_classes, device=self.device)
         if backbone_weights:
-            print(f"Loading custom backbone weights from: {backbone_weights}")
             self.backbone.load_checkpoint(backbone_weights)
-        else:
-            print("INFO: Using default pre-trained ImageNet weights for the backbone.")
         self.backbone.eval()
         
         self.detector = YOLODetector(weights_path=yolo_weights, device=self.device)
         self.captioner = BLIPCaptioner(device=self.device)
         self.spam_checker = SentenceTransformer(spam_model, device=self.device)
-
-    def _is_relevant(self, combined_user_text: str, ai_caption: str, prediction_label: str, threshold: float = 0.50) -> Dict:
-        if not combined_user_text.strip():
-            return {"is_relevant": True, "relevance_score": 1.0, "reason": "No user text provided."}
-        
-        user_emb = self.spam_checker.encode(combined_user_text, convert_to_tensor=True)
-        caption_emb = self.spam_checker.encode(ai_caption, convert_to_tensor=True)
-        prediction_emb = self.spam_checker.encode(prediction_label.replace("_", " "), convert_to_tensor=True)
-        
-        score_vs_caption = util.pytorch_cos_sim(user_emb, caption_emb).item()
-        score_vs_prediction = util.pytorch_cos_sim(user_emb, prediction_emb).item()
-        
-        final_score = max(score_vs_caption, score_vs_prediction)
-        is_relevant = final_score >= threshold
-        reason = "User input aligns with image content or prediction." if is_relevant else "User input may not match the image content."
-        
-        return {"is_relevant": is_relevant, "relevance_score": final_score, "reason": reason}
+# In models/ensemble/fuser.py, inside the CivicIssueFuser class
 
     @torch.no_grad()
     def predict(self, image: Image.Image, issue_title: str = "", user_description: str = "") -> Dict:
-        """Simplified prediction method."""
-        
         yolo_predictions = self.detector.predict(image)
         ai_caption = self.captioner.caption(image)
         
@@ -87,18 +49,39 @@ class CivicIssueFuser:
         prediction_idx = torch.argmax(final_probs).item()
         confidence = final_probs[prediction_idx].item()
         
-        # Directly look up the predicted department from the simplified CLASS_MAP
         predicted_department = CLASS_MAP.get(prediction_idx, "Uncategorized")
         
-        # Spam check uses the combined user text and the predicted department name
+        # --- Multi-Signal Spam Check Logic (without 'reason') ---
+        
+        relevance_check = {
+            "is_relevant": False,
+            "score_visual": 0.0,
+            "score_contextual": 0.0
+        }
+        
         combined_user_text = f"{issue_title}. {user_description}"
-        relevance_check = self._is_relevant(combined_user_text, ai_caption, predicted_department)
+        
+        if not combined_user_text.strip() or combined_user_text == "N/A":
+            relevance_check = {"is_relevant": True, "score_visual": 1.0, "score_contextual": 1.0}
+        else:
+            user_emb = self.spam_checker.encode(combined_user_text)
+            caption_emb = self.spam_checker.encode(ai_caption)
+            prediction_emb = self.spam_checker.encode(predicted_department)
+            
+            score_visual = util.cos_sim(user_emb, caption_emb).item()
+            relevance_check["score_visual"] = score_visual
+            
+            score_contextual = util.cos_sim(user_emb, prediction_emb).item()
+            relevance_check["score_contextual"] = score_contextual
+
+            threshold = 0.35
+            if score_visual >= threshold and score_contextual >= threshold:
+                relevance_check["is_relevant"] = True
 
         return {
-            "department": predicted_department, # The main prediction is the department
+            "department": predicted_department,
             "confidence": confidence,
             "relevance": relevance_check,
             "ai_caption": ai_caption,
-            "detections": yolo_predictions,
-            "model_version": "1.0-department-direct"
+            "detections": yolo_predictions
         }

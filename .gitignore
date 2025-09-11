@@ -10,27 +10,52 @@ __pycache__/
 *.log
 
 # Virtual environment
+.venv/
 venv/
 ENV/
 env/
-.venv/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
 # ------------------------
-# Data & Models
+# Data & Models (Crucial for your project)
 # ------------------------
-data/raw/
-data/processed/
-data/synthetic/
-data/annotations/
+# Ignore the large folder of training/validation images
+dataset/
+
+# Ignore the folder of test images
+batch_images/
+
+# Ignore the large trained model files
 weights/
 *.pt
 *.pth
 *.onnx
 *.engine
 *.ckpt
+
+# ------------------------
+# Generated Reports & Backups
+# ------------------------
+# Ignore generated PowerPoint and CSV reports
+*.pptx
+*.csv
+# Ignore the Redis database backup file
+*.rdb
+
+# ------------------------
+# API Keys & Secrets (VERY IMPORTANT)
+# ------------------------
+# Ignore your Kaggle API key if you use it
+kaggle.json
+
+# ------------------------
+# Compressed Files
+# ------------------------
+# Ignore large zipped datasets
+*.zip
+*.rar
 
 # ------------------------
 # Cache & Temp

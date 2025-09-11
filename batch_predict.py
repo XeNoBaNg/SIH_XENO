@@ -9,13 +9,9 @@ import pptx.util
 import io
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 
-# Import your CivicIssueFuser
 from models.ensemble.fuser import CivicIssueFuser
 
 def generate_report(image_folder: str, weights_path: str, num_classes: int, output_file: str, file_format: str, metadata_csv: str = None):
-    """
-    Processes a batch of images and generates a report with a custom slide layout.
-    """
     print(f"--- Starting Batch Prediction (Format: {file_format.upper()}) ---")
     
     fuser = CivicIssueFuser(
@@ -23,14 +19,17 @@ def generate_report(image_folder: str, weights_path: str, num_classes: int, outp
         num_classes=num_classes,
     )
     
-    descriptions = {}
+    metadata = {}
     if metadata_csv:
-        print(f"Loading descriptions from {metadata_csv}...")
+        print(f"Loading metadata from {metadata_csv}...")
         try:
             with open(metadata_csv, 'r', encoding='utf-8-sig') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    descriptions[row['filename']] = row['description']
+                    metadata[row['filename']] = {
+                        'issue_title': row.get('issue_title', 'N/A'),
+                        'description': row.get('description', 'N/A')
+                    }
         except FileNotFoundError:
             print(f"Warning: Metadata file not found at {metadata_csv}. Proceeding without descriptions.")
 
@@ -45,11 +44,13 @@ def generate_report(image_folder: str, weights_path: str, num_classes: int, outp
     
     if file_format == 'pptx':
         prs = Presentation()
-        # --- LAYOUT CHANGE: Use "Title Only" layout for more control ---
         slide_layout = prs.slide_layouts[5]
     else: # CSV
         csv_file = open(output_file, 'w', newline='', encoding='utf-8')
-        fieldnames = ['filename', 'user_description', 'prediction', 'confidence', 'ai_caption', 'is_relevant', 'relevance_score']
+        fieldnames = [
+            'filename', 'issue_title', 'user_description', 'predicted_department', 
+            'confidence', 'ai_caption', 'is_relevant', 'relevance_score'
+        ]
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -57,29 +58,32 @@ def generate_report(image_folder: str, weights_path: str, num_classes: int, outp
         try:
             image_path = os.path.join(image_folder, filename)
             image = Image.open(image_path).convert("RGB")
-            user_desc = descriptions.get(filename, "N/A")
-            result = fuser.predict(image, user_description=user_desc)
+            
+            file_meta = metadata.get(filename, {'issue_title': 'N/A', 'description': 'N/A'})
+            issue_title = file_meta['issue_title']
+            user_desc = file_meta['description']
+            
+            result = fuser.predict(
+                image=image, 
+                issue_title=issue_title,
+                user_description=user_desc
+            )
+            
+            relevance = result.get('relevance', {})
             
             if file_format == 'pptx':
                 slide = prs.slides.add_slide(slide_layout)
-                
-                # Set Title (this placeholder exists in the "Title Only" layout)
                 title = slide.shapes.title
                 title.text = f"Analysis for: {filename}"
                 
-                # Convert image to PNG in memory
                 image_stream = io.BytesIO()
                 image.save(image_stream, format="PNG")
                 image_stream.seek(0)
                 
-                # --- LAYOUT CHANGE: Manually add and position the image ---
-                # Position arguments are (left, top, width)
-                # Slide is typically 10" wide by 7.5" high
                 img_width = pptx.util.Inches(4.5)
-                img_left = (prs.slide_width - img_width) / 2 # Center horizontally
+                img_left = (prs.slide_width - img_width) / 2
                 slide.shapes.add_picture(image_stream, img_left, pptx.util.Inches(1.5), width=img_width)
 
-                # --- LAYOUT CHANGE: Manually add and position the text box ---
                 txBox_left = pptx.util.Inches(1.0)
                 txBox_top = pptx.util.Inches(4.5)
                 txBox_width = pptx.util.Inches(8.0)
@@ -88,13 +92,10 @@ def generate_report(image_folder: str, weights_path: str, num_classes: int, outp
                 
                 tf = text_box.text_frame
                 tf.clear()
-                
-                # Apply formatting
                 tf.vertical_anchor = MSO_ANCHOR.MIDDLE
                 tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
                 tf.word_wrap = True
 
-                relevance = result.get('relevance', {})
                 spam_status = "Not Spam" if relevance.get('is_relevant') else "Potential Spam"
                 relevance_score = relevance.get('relevance_score', 0)
                 
@@ -103,10 +104,11 @@ def generate_report(image_folder: str, weights_path: str, num_classes: int, outp
                 detections_str = ", ".join(detected_items) if detected_items else "None"
                 
                 content = (
+                    f"Issue Title: {issue_title}\n"
                     f"User Description: {user_desc}\n\n"
-                    f"Spam Check: {spam_status} (Score: {relevance_score:.2f})\n"
+                    f"Spam Check: {spam_status} (Overall Score: {relevance_score:.2f})\n"
                     f"------------------------------------\n"
-                    f"AI Model Prediction: {result.get('prediction', 'error')}\n"
+                    f"Predicted Department: {result.get('department', 'error')}\n"
                     f"Confidence: {result.get('confidence', 0):.2%}\n"
                     f"AI Generated Caption: {result.get('ai_caption', '')}\n"
                     f"Detected Objects: {detections_str}"
@@ -118,7 +120,14 @@ def generate_report(image_folder: str, weights_path: str, num_classes: int, outp
                 p.alignment = PP_ALIGN.CENTER
             
             else: # CSV Logic
-                pass
+                writer.writerow({
+                    'filename': filename, 'issue_title': issue_title, 'user_description': user_desc,
+                    'predicted_department': result.get('department', 'error'),
+                    'confidence': f"{result.get('confidence', 0):.4f}",
+                    'ai_caption': result.get('ai_caption', ''),
+                    'is_relevant': relevance.get('is_relevant', False),
+                    'relevance_score': f"{relevance.get('relevance_score', 0):.4f}",
+                })
 
         except Exception as e:
             print(f"\nError processing {filename}: {e}")
@@ -133,14 +142,13 @@ def generate_report(image_folder: str, weights_path: str, num_classes: int, outp
 
 
 if __name__ == '__main__':
-    # (Argument parsing code remains the same)
     parser = argparse.ArgumentParser(description="Run batch predictions on a folder of images.")
     parser.add_argument('--image_folder', type=str, required=True, help="Path to the folder containing images.")
     parser.add_argument('--weights', type=str, required=True, help="Path to the trained model weights file.")
     parser.add_argument('--num_classes', type=int, required=True, help="The number of classes the model was trained on.")
     parser.add_argument('--output_file', type=str, required=True, help="Path to save the output report file.")
     parser.add_argument('--format', type=str, choices=['pptx', 'csv'], default='csv', help="Format of the output report.")
-    parser.add_argument('--metadata_csv', type=str, required=False, help="Optional path to a CSV file with descriptions.")
+    parser.add_argument('--metadata_csv', type=str, required=False, help="Optional path to a CSV with 'filename', 'issue_title', and 'description'.")
     
     args = parser.parse_args()
     
